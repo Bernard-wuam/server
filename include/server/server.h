@@ -40,6 +40,7 @@
 #include <functional>
 #include <iostream>
 #include <optional>
+#include <taskgroup/taskgroup.h>
 #include <vector>
 
 class Server {
@@ -60,17 +61,14 @@ class Server {
   // handle session is a function that take a string and return's a /*return
   // value*/.
 
-  boost::asio::awaitable<
-      void, boost::asio::strand<boost::asio::io_context::executor_type>>
-  handleRequest(
+  boost::asio::awaitable<void, executorType> handleRequest(
       boost::beast::http::request<boost::beast::http::empty_body> &request) {
 
     co_return;
   }
 
   template <typename Stream>
-  boost::asio::awaitable<
-      void, boost::asio::strand<boost::asio::io_context::executor_type>>
+  boost::asio::awaitable<void, executorType>
   httpsSession(boost::beast::flat_buffer &buffer, Stream &socketStream) {
 
     auto cs = co_await boost::asio::this_coro::cancellation_state;
@@ -116,8 +114,7 @@ class Server {
     co_return;
   }
 
-  boost::asio::awaitable<
-      void, boost::asio::strand<boost::asio::io_context::executor_type>>
+  boost::asio::awaitable<void, executorType>
   detechSession(socketStreamType &&socket, boost::asio::ssl::context &ctx) {
 
     co_await boost::asio::this_coro::reset_cancellation_state(
@@ -158,10 +155,9 @@ class Server {
   }
 
 public:
-  boost::asio::awaitable<
-      void, boost::asio::strand<boost::asio::io_context::executor_type>>
+  boost::asio::awaitable<void, executorType>
   startServer(boost::asio::ssl::context &ctx,
-              boost::asio::ip::tcp::endpoint &endPoint) {
+              boost::asio::ip::tcp::endpoint &endPoint, TaskGroup &taskGroup) {
     auto cs = co_await boost::asio::this_coro::cancellation_state;
     // get the context
     auto executor = co_await boost::asio::this_coro::executor;
@@ -189,7 +185,7 @@ public:
       boost::asio::co_spawn(
           std::move(strand),
           detechSession(socketStreamType{std::move(socket)}, ctx),
-          [](std::exception_ptr e) {
+          taskGroup.adapt([](std::exception_ptr e) {
             if (e) {
               try {
                 std::rethrow_exception(e);
@@ -200,7 +196,7 @@ public:
                 return;
               }
             }
-          });
+          }));
     }
     co_return;
   }
