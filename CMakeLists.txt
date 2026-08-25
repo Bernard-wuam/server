@@ -16,10 +16,17 @@ target_sources(
     FILES ${CMAKE_CURRENT_LIST_DIR}/include/server/server.h
 )
 
+FetchContent_Declare(
+    HandleSignals
+    GIT_REPOSITORY https://github.com/Bernard-wuam/handlesignals.git
+    GIT_TAG 7568868690fcda9765c025be68716d452b647b57
+)
+FetchContent_MakeAvailable(HandleSignals)
+
 find_package(boost_beast CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 
-target_link_libraries(Server INTERFACE Boost::beast OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(Server PUBLIC Boost::beast OpenSSL::SSL OpenSSL::Crypto HandleSignals::HandleSignals)
 
 install(TARGETS Server
     EXPORT ServerTargets
