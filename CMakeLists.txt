@@ -20,12 +20,12 @@ include(FetchContent)
 FetchContent_Declare(
     HandleSignals
     GIT_REPOSITORY https://github.com/Bernard-wuam/handlesignals.git
-    GIT_TAG 7568868690fcda9765c025be68716d452b647b57
+    GIT_TAG main
 )
 FetchContent_Declare(
     LoadServerCertificate
     GIT_REPOSITORY https://github.com/Bernard-wuam/loadservercertificates.git
-    GIT_TAG 00567dac92d4b30e7ea38de642bc2f569718cd76
+    GIT_TAG main
 )
 FetchContent_MakeAvailable(HandleSignals LoadServerCertificate)
 
