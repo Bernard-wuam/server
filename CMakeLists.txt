@@ -32,7 +32,7 @@ FetchContent_MakeAvailable(HandleSignals LoadServerCertificate)
 find_package(boost_beast CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 
-target_link_libraries(Server PUBLIC Boost::beast OpenSSL::SSL
+target_link_libraries(Server INTERFACE Boost::beast OpenSSL::SSL
     OpenSSL::Crypto HandleSignals::HandleSignals LoadServerCertificate::LoadServerCertificate)
 
 install(TARGETS Server
