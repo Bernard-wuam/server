@@ -3,7 +3,6 @@ include("${CMAKE_CURRENT_LIST_DIR}/ServerTargets.cmake")
 
 include(CMakeFindDependencyMacro)
 find_dependency(boost_beast CONFIG REQUIRED)
-find_dependency(HandleSignals REQUIRED)
 
 
 set_and_check(Server_INCLUDE_DIR "${PACKAGE_PREFIX_DIR}/include/server")
