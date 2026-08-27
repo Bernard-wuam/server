@@ -32,6 +32,8 @@
 #include <boost/beast/http/parser_fwd.hpp>
 #include <boost/beast/http/status.hpp>
 #include <boost/beast/http/string_body_fwd.hpp>
+#include <boost/mysql.hpp>
+#include <boost/mysql/connection_pool.hpp>
 #include <boost/none.hpp>
 #include <boost/system/detail/error_code.hpp>
 #include <boost/system/system_error.hpp>
@@ -44,6 +46,8 @@
 #include <vector>
 
 class Server {
+
+  boost::mysql::connection_pool &m_connectionPool;
 
   using executorType =
       boost::asio::strand<boost::asio::io_context::executor_type>;
@@ -155,6 +159,9 @@ class Server {
   }
 
 public:
+  Server(boost::mysql::connection_pool &connectionPool)
+      : m_connectionPool(connectionPool) {};
+
   boost::asio::awaitable<void, executorType>
   startServer(boost::asio::ssl::context &ctx,
               boost::asio::ip::tcp::endpoint &endPoint, TaskGroup &taskGroup) {

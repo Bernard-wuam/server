@@ -3,7 +3,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/ServerTargets.cmake")
 
 include(CMakeFindDependencyMacro)
 find_dependency(boost_beast CONFIG REQUIRED)
-
+find_dependency(boost_mysql CONFIG REQUIRED)
+find_dependency(OpenSSL REQUIRED)
 
 set_and_check(Server_INCLUDE_DIR "${PACKAGE_PREFIX_DIR}/include/server")
 
