@@ -60,7 +60,8 @@ class Server {
 
   std::vector<std::function<std::optional<
       boost::beast::http::response<boost::beast::http::string_body>>(
-      boost::beast::http::request<boost::beast::http::empty_body> &)>>
+      boost::beast::http::request<boost::beast::http::empty_body> &,
+      boost::mysql::connection_pool &)>>
       m_handleList;
   // handle session is a function that take a string and return's a /*return
   // value*/.
@@ -100,7 +101,7 @@ class Server {
       bool keepAlive = false;
 
       for (int i = 0; i < m_handleList.size(); i++) {
-        auto resOptional = m_handleList[i](reqParser.get());
+        auto resOptional = m_handleList[i](reqParser.get(), m_connectionPool);
 
         if (resOptional.has_value()) {
           keepAlive = resOptional.value().keep_alive();
@@ -211,8 +212,8 @@ public:
   void addHandleRequest(
       const std::function<std::optional<
           boost::beast::http::response<boost::beast::http::string_body>>(
-          boost::beast::http::request<boost::beast::http::empty_body> &req)>
-          &func) {
+          boost::beast::http::request<boost::beast::http::empty_body> &,
+          boost::mysql::connection_pool &)> &func) {
     m_handleList.push_back(std::move(func));
   }
 }; // namespace Server
