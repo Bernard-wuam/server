@@ -58,8 +58,12 @@ class Server {
   using aceptorType = typename boost::asio::ip::tcp::acceptor::rebind_executor<
       executorType>::other;
 
-  std::vector<std::function<std::optional<
-      boost::beast::http::response<boost::beast::http::string_body>>(
+  using returnType = std::optional<
+      boost::beast::http::response<boost::beast::http::string_body>>;
+
+  using functionType = boost::asio::awaitable<returnType, executorType>;
+
+  std::vector<std::function<functionType(
       boost::beast::http::request<boost::beast::http::empty_body> &,
       boost::mysql::connection_pool &)>>
       m_handleList;
@@ -101,7 +105,7 @@ class Server {
       bool keepAlive = false;
 
       for (int i = 0; i < m_handleList.size(); i++) {
-        auto resOptional = m_handleList[i](reqParser.get(), m_connectionPool);
+        auto resOptional = co_await  m_handleList[i](reqParser.get(), m_connectionPool);
 
         if (resOptional.has_value()) {
           keepAlive = resOptional.value().keep_alive();
@@ -210,8 +214,7 @@ public:
   }
 
   void addHandleRequest(
-      const std::function<std::optional<
-          boost::beast::http::response<boost::beast::http::string_body>>(
+      const std::function<functionType(
           boost::beast::http::request<boost::beast::http::empty_body> &,
           boost::mysql::connection_pool &)> &func) {
     m_handleList.push_back(std::move(func));
