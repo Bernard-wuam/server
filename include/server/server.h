@@ -104,8 +104,8 @@ class Server {
       }
       bool keepAlive = false;
 
-      for (int i = 0; i < m_handleList.size(); i++) {
-        auto resOptional = co_await  m_handleList[i](reqParser.get(), m_connectionPool);
+      for (auto &c : m_handleList) {
+        auto resOptional = co_await c(reqParser.get(), m_connectionPool);
 
         if (resOptional.has_value()) {
           keepAlive = resOptional.value().keep_alive();
