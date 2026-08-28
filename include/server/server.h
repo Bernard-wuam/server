@@ -64,14 +64,14 @@ class Server {
   using functionType = boost::asio::awaitable<returnType, executorType>;
 
   std::vector<std::function<functionType(
-      boost::beast::http::request<boost::beast::http::empty_body> &,
+      boost::beast::http::request<boost::beast::http::string_body> &,
       boost::mysql::connection_pool &)>>
       m_handleList;
   // handle session is a function that take a string and return's a /*return
   // value*/.
 
   boost::asio::awaitable<void, executorType> handleRequest(
-      boost::beast::http::request<boost::beast::http::empty_body> &request) {
+      boost::beast::http::request<boost::beast::http::string_body> &request) {
 
     co_return;
   }
@@ -83,7 +83,7 @@ class Server {
     auto cs = co_await boost::asio::this_coro::cancellation_state;
 
     while (!cs.cancelled()) {
-      boost::beast::http::request_parser<boost::beast::http::empty_body>
+      boost::beast::http::request_parser<boost::beast::http::string_body>
           reqParser;
       reqParser.body_limit(10000);
 
@@ -215,7 +215,7 @@ public:
 
   void addHandleRequest(
       const std::function<functionType(
-          boost::beast::http::request<boost::beast::http::empty_body> &,
+          boost::beast::http::request<boost::beast::http::string_body> &,
           boost::mysql::connection_pool &)> &func) {
     m_handleList.push_back(std::move(func));
   }
