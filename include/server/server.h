@@ -89,7 +89,7 @@ class Server {
 
       boost::system::error_code ec;
 
-      auto readSize = co_await boost::beast::http::async_read_header(
+      auto readSize = co_await boost::beast::http::async_read(
           socketStream, buffer, reqParser, boost::asio::redirect_error(ec));
 
       if (ec == boost::beast::http::error::end_of_stream ||
