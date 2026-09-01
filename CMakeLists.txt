@@ -28,11 +28,11 @@ FetchContent_Declare(
     GIT_TAG main
 )
 FetchContent_Declare(
-    MysqlDB
-    GIT_REPOSITORY https://github.com/Bernard-wuam/mysqldb.git
+    JsonResponse
+    GIT_REPOSITORY https://github.com/Bernard-wuam/jsonresponse.git
     GIT_TAG main
 )
-FetchContent_MakeAvailable(HandleSignals LoadServerCertificate)
+FetchContent_MakeAvailable(HandleSignals LoadServerCertificate JsonResponse)
 
 find_package(boost_beast CONFIG REQUIRED)
 find_package(boost_mysql CONFIG REQUIRED)
@@ -40,7 +40,7 @@ find_package(OpenSSL REQUIRED)
 
 target_link_libraries(Server INTERFACE Boost::beast OpenSSL::SSL
     OpenSSL::Crypto HandleSignals::HandleSignals
-    LoadServerCertificate::LoadServerCertificate Boost::mysql)
+    LoadServerCertificate::LoadServerCertificate JsonResponse::JsonResponse Boost::mysql)
 
 install(TARGETS Server
     EXPORT ServerTargets
