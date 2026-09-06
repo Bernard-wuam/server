@@ -27,6 +27,13 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/Bernard-wuam/loadservercertificates.git
     GIT_TAG main
 )
+
+FetchContent_Declare(
+    ServerError
+    GIT_REPOSITORY https://github.com/Bernard-wuam/servererror.git
+    GIT_TAG main
+)
+
 FetchContent_Declare(
     JsonResponse
     GIT_REPOSITORY https://github.com/Bernard-wuam/jsonresponse.git
@@ -37,15 +44,14 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/Bernard-wuam/serverutilities.git
     GIT_TAG main
 )
-FetchContent_MakeAvailable(ServerUtilities)
-FetchContent_MakeAvailable(HandleSignals LoadServerCertificate JsonResponse ServerUtilities)
+FetchContent_MakeAvailable(HandleSignals LoadServerCertificate ServerError JsonResponse ServerUtilities)
 
 find_package(boost_beast CONFIG REQUIRED)
 find_package(boost_mysql CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 
 target_link_libraries(Server INTERFACE Boost::beast OpenSSL::SSL
-    OpenSSL::Crypto HandleSignals::HandleSignals ServerUtilities::ServerUtilities
+    OpenSSL::Crypto HandleSignals::HandleSignals ServerError::ServerError ServerUtilities::ServerUtilities
     LoadServerCertificate::LoadServerCertificate JsonResponse::JsonResponse Boost::mysql)
 
 install(TARGETS Server
