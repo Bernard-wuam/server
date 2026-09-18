@@ -51,10 +51,23 @@
 #include <utility>
 #include <vector>
 
+class Server;
+
 class GetRequest {
 
   std::vector<std::pair<std::string, std::string>> m_paramsList;
   boost::urls::params_view m_QueryList;
+
+  void setParams(const std::vector<std::pair<std::string, std::string>> &vec) {
+    m_paramsList = vec;
+  }
+  void setQueries(const boost::urls::params_view &querries) {
+    m_QueryList = querries;
+  }
+
+  void addParams(const std::pair<std::string, std::string> &val) {
+    m_paramsList.push_back(val);
+  }
 
 public:
   std::optional<std::vector<std::pair<std::string, std::string>>>
@@ -74,75 +87,15 @@ public:
     return m_QueryList;
   }
 
-  void setParams(const std::vector<std::pair<std::string, std::string>> &vec) {
-    m_paramsList = vec;
-  }
-
-  void setQueries(const boost::urls::params_view &querries) {
-    m_QueryList = querries;
-  }
-
-  void addParams(const std::pair<std::string, std::string> &val) {
-    m_paramsList.push_back(val);
-  }
+  friend class Server;
 };
 
 class Server {
 
-  std::optional<boost::urls::params_view>
-  getQueries(const std::string &target) {
-    auto c = boost::urls::parse_relative_ref(target);
-    if (c.has_error() || !c->has_query())
-      return std::nullopt;
-    return c.value().params();
-  }
+  std::optional<boost::urls::params_view> getQueries(const std::string &);
 
   std::optional<std::vector<std::pair<std::string, std::string>>>
-  getParams(std::string path, std::string target) {
-    if (path.find(':') == std::string::npos)
-      return std::nullopt;
-
-    std::cout << "stred" << std::endl;
-
-    auto paths = boost::urls::parse_relative_ref(path);
-    if (paths.has_error())
-      return std::nullopt;
-
-    std::vector<std::string> vecPath(paths.value().segments().begin(),
-                                     paths.value().segments().end());
-    if (vecPath.empty())
-      return std::nullopt;
-    auto targets = boost::urls::parse_relative_ref(target);
-    if (targets.has_error())
-      return std::nullopt;
-
-    std::vector<std::string> vecTarget(targets.value().segments().begin(),
-                                       targets.value().segments().end());
-    if (vecTarget.empty())
-      return std::nullopt;
-
-    std::cout << "reached " << std::endl;
-
-    if (vecTarget.size() != vecPath.size())
-      return std::nullopt;
-
-    std::cout << "reached 1" << std::endl;
-
-    std::vector<std::pair<std::string, std::string>> list;
-
-    for (int i = 0; i < vecPath.size(); i++) {
-      if (auto index = vecPath[i].find(':') != std::string::npos) {
-        auto key = vecPath[i].substr(index);
-        auto value = vecTarget[i];
-        list.push_back(std::make_pair(key, value));
-      } else {
-        if (vecPath[i] != vecTarget[i])
-          return std::nullopt;
-      }
-    }
-
-    return list;
-  };
+      getParams(std::string, std::string);
 
   boost::mysql::connection_pool &m_connectionPool;
 
@@ -176,251 +129,327 @@ class Server {
   // handle session is a function that take a string and return's a /*return
   // value*/.
 
-  boost::asio::awaitable<void, executorType> handleRequest(
-      boost::beast::http::request<boost::beast::http::string_body> &request) {
+  // boost::asio::awaitable<void, executorType> handleRequest(
+  //     boost::beast::http::request<boost::beast::http::string_body> &request)
+  //     {
 
-    co_return;
-  }
+  //   co_return;
+  // }
 
   template <typename Stream>
   boost::asio::awaitable<void, executorType>
-  httpsSession(boost::beast::flat_buffer &buffer, Stream &socketStream) {
-
-    auto cs = co_await boost::asio::this_coro::cancellation_state;
-
-    while (!cs.cancelled()) {
-      boost::beast::http::request_parser<boost::beast::http::string_body>
-          reqParser;
-      reqParser.body_limit(10000);
-
-      boost::system::error_code ec;
-
-      auto readSize = co_await boost::beast::http::async_read(
-          socketStream, buffer, reqParser, boost::asio::redirect_error(ec));
-
-      if (ec == boost::beast::http::error::end_of_stream ||
-          ec == boost::beast::error::timeout)
-        co_return;
-
-      buffer.consume(readSize);
-
-      if (ec) {
-        std::cerr << ec.what() << std::endl;
-        co_return;
-      }
-      bool keepAlive = false;
-
-      // for (auto &c : m_handleList) {
-      //   auto resOptional = co_await c(reqParser.get(), m_connectionPool);
-
-      //   if (resOptional.has_value()) {
-      //     keepAlive = resOptional.value().keep_alive();
-      //     auto writeSize = co_await boost::beast::http::async_write(
-      //         socketStream, resOptional.value(),
-      //         boost::asio::redirect_error(ec));
-
-      //     break;
-      //   }
-      // }
-
-      for (auto &c : m_routes) {
-        auto path = std::get<0>(c);
-        auto func = std::get<1>(c);
-
-        // std::string target = reqParser.get().target();
-        auto targetHasQueries = getQueries(reqParser.get().target());
-
-        if (targetHasQueries.has_value()) {
-          std::cout << "has querries,,," << std::endl;
-          auto pathHasParams = getParams(path, reqParser.get().target());
-
-          if (pathHasParams.has_value()) {
-
-            std::cout << "has params\n";
-            std::cout << "has querres\n";
-            // has params
-            // has querries
-
-            // create the GetRequest and await the function result;
-
-            GetRequest req;
-            req.setParams(pathHasParams.value());
-            req.setQueries(targetHasQueries.value());
-
-            auto res = co_await func(req, m_connectionPool);
-
-            keepAlive = res.keep_alive();
-            auto writeSize = co_await boost::beast::http::async_write(
-                socketStream, res, boost::asio::redirect_error(ec));
-            break;
-          }
-
-          std::cout << boost::urls::parse_uri_reference(
-                           reqParser.get().target())
-                           ->path()
-                    << std::endl;
-
-          if (path == boost::urls::parse_uri_reference(reqParser.get().target())
-                          ->path()) {
-            // do not have a params but querries.
-            // set the querries and wait on the func.
-
-            std::cout << "has only querres\n";
-
-            GetRequest req;
-            // req.setParams(pathHasParams.value());
-            req.setQueries(targetHasQueries.value());
-
-            auto res = co_await func(req, m_connectionPool);
-
-            keepAlive = res.keep_alive();
-            auto writeSize = co_await boost::beast::http::async_write(
-                socketStream, res, boost::asio::redirect_error(ec));
-            std::cout << "after writing" << std::endl;
-            break;
-          }
-
-        } else {
-          auto hasParams = getParams(path, reqParser.get().target());
-
-          if (hasParams.has_value()) {
-            std::cout << "has only params" << std::endl;
-            GetRequest req;
-            req.setParams(hasParams.value());
-            auto res = co_await func(req, m_connectionPool);
-
-            keepAlive = res.keep_alive();
-            auto writeSize = co_await boost::beast::http::async_write(
-                socketStream, res, boost::asio::redirect_error(ec));
-            std::cout << "after writing" << std::endl;
-            break;
-          }
-          if (path == reqParser.get().target()) {
-
-            std::cout << "just plain reques\n";
-
-            // do not have params and querries
-            GetRequest req;
-            auto res = co_await func(req, m_connectionPool);
-
-            keepAlive = res.keep_alive();
-            auto writeSize = co_await boost::beast::http::async_write(
-                socketStream, res, boost::asio::redirect_error(ec));
-            break;
-          }
-        }
-      }
-
-      if (!keepAlive)
-        break;
-    }
-    co_return;
-  }
+  httpsSession(boost::beast::flat_buffer &, Stream &);
 
   boost::asio::awaitable<void, executorType>
-  detechSession(socketStreamType &&socket, boost::asio::ssl::context &ctx) {
-
-    co_await boost::asio::this_coro::reset_cancellation_state(
-        boost::asio::enable_total_cancellation(),
-        boost::asio::enable_terminal_cancellation());
-
-    co_await boost::asio::this_coro::throw_if_cancelled(false);
-
-    boost::beast::flat_buffer flatBuffer;
-    socketStreamType socketStream{std::move(socket)};
-
-    socketStream.expires_after(std::chrono::seconds(60));
-
-    if (co_await boost::beast::async_detect_ssl(socketStream, flatBuffer)) {
-
-      boost::asio::ssl::stream<socketStreamType> socketSslStream(
-          std::move(socketStream), ctx);
-
-      auto size = co_await socketSslStream.async_handshake(
-          boost::asio::ssl::stream_base::handshake_type::server,
-          flatBuffer.data());
-
-      flatBuffer.consume(size);
-      // start session.
-      co_await httpsSession(flatBuffer, socketSslStream);
-
-      if (socketSslStream.lowest_layer().is_open()) {
-        boost::system::error_code ec;
-
-        co_await socketSslStream.async_shutdown(
-            boost::asio::redirect_error(ec));
-        if (ec && ec != boost::asio::ssl::error::stream_truncated) {
-          throw boost::system::system_error(ec);
-        }
-      }
-    }
-    // co_await httpsSession(flatBuffer, socketStream);
-  }
+  detechSession(socketStreamType &&, boost::asio::ssl::context &);
 
 public:
-  Server(boost::mysql::connection_pool &connectionPool)
-      : m_connectionPool(connectionPool) {};
+  Server(boost::mysql::connection_pool &);
 
   boost::asio::awaitable<void, executorType>
-  startServer(boost::asio::ssl::context &ctx,
-              boost::asio::ip::tcp::endpoint &endPoint, TaskGroup &taskGroup) {
-    auto cs = co_await boost::asio::this_coro::cancellation_state;
-    // get the context
-    auto executor = co_await boost::asio::this_coro::executor;
+  startServer(boost::asio::ssl::context &, boost::asio::ip::tcp::endpoint &,
+              TaskGroup &);
 
-    co_await boost::asio::this_coro::reset_cancellation_state(
-        boost::asio::enable_total_cancellation());
-
-    auto acceptor = aceptorType{executor, endPoint};
-
-    boost::system::error_code ec;
-
-    while (!cs.cancelled()) {
-      auto strand = boost::asio::make_strand(executor.get_inner_executor());
-
-      auto socket = co_await acceptor.async_accept(
-          strand, boost::asio::redirect_error(ec));
-
-      if (ec) {
-        if (ec == boost::asio::error::operation_aborted)
-          co_return;
-        std::cerr << "acceptor error" << std::endl;
-        co_return;
-      }
-
-      boost::asio::co_spawn(
-          std::move(strand),
-          detechSession(socketStreamType{std::move(socket)}, ctx),
-          taskGroup.adapt([](std::exception_ptr e) {
-            if (e) {
-              try {
-                std::rethrow_exception(e);
-              } catch (const std::exception &ec) {
-                std::cerr << ec.what() << std::endl;
-                std::cerr << "co_spawn error from detect session..."
-                          << std::endl;
-                return;
-              }
-            }
-          }));
-    }
-    co_return;
-  }
+  void setParams(GetRequest &req,
+                 std::vector<std::pair<std::string, std::string>> paramsList);
 
   void addHandleRequest(
       const std::function<functionType(
           boost::beast::http::request<boost::beast::http::string_body> &,
-          boost::mysql::connection_pool &)> &func) {
-    m_handleList.push_back(std::move(func));
-  }
-  void addHandleRequest(std::string path, rget req) {
-    // std::pair<std::string,rget> m(path,req);
-    // m_routes.push_back(m);
-    m_routes.push_back(
-        std::make_pair<std::string, rget>(std::move(path), std::move(req)));
-  }
+          boost::mysql::connection_pool &)> &);
+
+  void addHandleRequest(std::string, rget);
 
   // GetRequest resolvePath(const std::string &path) {
   //   // /users/:id/company/
   // }
 }; // namespace Server
+
+inline Server::Server(boost::mysql::connection_pool &connectionPool)
+    : m_connectionPool(connectionPool) {};
+
+inline std::optional<boost::urls::params_view>
+Server::getQueries(const std::string &target) {
+  auto c = boost::urls::parse_relative_ref(target);
+  if (c.has_error() || !c->has_query())
+    return std::nullopt;
+  return c.value().params();
+}
+
+inline std::optional<std::vector<std::pair<std::string, std::string>>>
+Server::getParams(std::string path, std::string target) {
+  if (path.find(':') == std::string::npos)
+    return std::nullopt;
+
+  std::cout << "stred" << std::endl;
+
+  auto paths = boost::urls::parse_relative_ref(path);
+  if (paths.has_error())
+    return std::nullopt;
+
+  std::vector<std::string> vecPath(paths.value().segments().begin(),
+                                   paths.value().segments().end());
+  if (vecPath.empty())
+    return std::nullopt;
+  auto targets = boost::urls::parse_relative_ref(target);
+  if (targets.has_error())
+    return std::nullopt;
+
+  std::vector<std::string> vecTarget(targets.value().segments().begin(),
+                                     targets.value().segments().end());
+  if (vecTarget.empty())
+    return std::nullopt;
+
+  std::cout << "reached " << std::endl;
+
+  if (vecTarget.size() != vecPath.size())
+    return std::nullopt;
+
+  std::cout << "reached 1" << std::endl;
+
+  std::vector<std::pair<std::string, std::string>> list;
+
+  for (int i = 0; i < vecPath.size(); i++) {
+    if (auto index = vecPath[i].find(':') != std::string::npos) {
+      auto key = vecPath[i].substr(index);
+      auto value = vecTarget[i];
+      list.push_back(std::make_pair(key, value));
+    } else {
+      if (vecPath[i] != vecTarget[i])
+        return std::nullopt;
+    }
+  }
+  return list;
+};
+
+template <typename Stream>
+inline boost::asio::awaitable<void, Server::executorType>
+Server::httpsSession(boost::beast::flat_buffer &buffer, Stream &socketStream) {
+
+  auto cs = co_await boost::asio::this_coro::cancellation_state;
+
+  while (!cs.cancelled()) {
+    boost::beast::http::request_parser<boost::beast::http::string_body>
+        reqParser;
+    reqParser.body_limit(10000);
+
+    boost::system::error_code ec;
+
+    auto readSize = co_await boost::beast::http::async_read(
+        socketStream, buffer, reqParser, boost::asio::redirect_error(ec));
+
+    if (ec == boost::beast::http::error::end_of_stream ||
+        ec == boost::beast::error::timeout)
+      co_return;
+
+    buffer.consume(readSize);
+
+    if (ec) {
+      std::cerr << ec.what() << std::endl;
+      co_return;
+    }
+    bool keepAlive = false;
+
+    // for (auto &c : m_handleList) {
+    //   auto resOptional = co_await c(reqParser.get(), m_connectionPool);
+
+    //   if (resOptional.has_value()) {
+    //     keepAlive = resOptional.value().keep_alive();
+    //     auto writeSize = co_await boost::beast::http::async_write(
+    //         socketStream, resOptional.value(),
+    //         boost::asio::redirect_error(ec));
+
+    //     break;
+    //   }
+    // }
+
+    for (auto &c : m_routes) {
+      auto path = std::get<0>(c);
+      auto func = std::get<1>(c);
+
+      // std::string target = reqParser.get().target();
+      auto targetHasQueries = getQueries(reqParser.get().target());
+
+      if (targetHasQueries.has_value()) {
+        std::cout << "has querries,,," << std::endl;
+        auto pathHasParams = getParams(path, reqParser.get().target());
+
+        if (pathHasParams.has_value()) {
+
+          std::cout << "has params\n";
+          std::cout << "has querres\n";
+          // has params
+          // has querries
+
+          // create the GetRequest and await the function result;
+
+          GetRequest req;
+          req.setParams(pathHasParams.value());
+          req.setQueries(targetHasQueries.value());
+
+          auto res = co_await func(req, m_connectionPool);
+
+          keepAlive = res.keep_alive();
+          auto writeSize = co_await boost::beast::http::async_write(
+              socketStream, res, boost::asio::redirect_error(ec));
+          break;
+        }
+
+        std::cout << boost::urls::parse_uri_reference(reqParser.get().target())
+                         ->path()
+                  << std::endl;
+
+        if (path == boost::urls::parse_uri_reference(reqParser.get().target())
+                        ->path()) {
+          // do not have a params but querries.
+          // set the querries and wait on the func.
+
+          std::cout << "has only querres\n";
+
+          GetRequest req;
+          // req.setParams(pathHasParams.value());
+          req.setQueries(targetHasQueries.value());
+
+          auto res = co_await func(req, m_connectionPool);
+
+          keepAlive = res.keep_alive();
+          auto writeSize = co_await boost::beast::http::async_write(
+              socketStream, res, boost::asio::redirect_error(ec));
+          std::cout << "after writing" << std::endl;
+          break;
+        }
+
+      } else {
+        auto hasParams = getParams(path, reqParser.get().target());
+
+        if (hasParams.has_value()) {
+          std::cout << "has only params" << std::endl;
+          GetRequest req;
+          req.setParams(hasParams.value());
+          auto res = co_await func(req, m_connectionPool);
+
+          keepAlive = res.keep_alive();
+          auto writeSize = co_await boost::beast::http::async_write(
+              socketStream, res, boost::asio::redirect_error(ec));
+          std::cout << "after writing" << std::endl;
+          break;
+        }
+        if (path == reqParser.get().target()) {
+
+          std::cout << "just plain reques\n";
+
+          // do not have params and querries
+          GetRequest req;
+          auto res = co_await func(req, m_connectionPool);
+
+          keepAlive = res.keep_alive();
+          auto writeSize = co_await boost::beast::http::async_write(
+              socketStream, res, boost::asio::redirect_error(ec));
+          break;
+        }
+      }
+    }
+
+    if (!keepAlive)
+      break;
+  }
+  co_return;
+}
+
+inline boost::asio::awaitable<void, Server::executorType>
+Server::startServer(boost::asio::ssl::context &ctx,
+                    boost::asio::ip::tcp::endpoint &endPoint,
+                    TaskGroup &taskGroup) {
+  auto cs = co_await boost::asio::this_coro::cancellation_state;
+  // get the context
+  auto executor = co_await boost::asio::this_coro::executor;
+
+  co_await boost::asio::this_coro::reset_cancellation_state(
+      boost::asio::enable_total_cancellation());
+
+  auto acceptor = aceptorType{executor, endPoint};
+
+  boost::system::error_code ec;
+
+  while (!cs.cancelled()) {
+    auto strand = boost::asio::make_strand(executor.get_inner_executor());
+
+    auto socket =
+        co_await acceptor.async_accept(strand, boost::asio::redirect_error(ec));
+
+    if (ec) {
+      if (ec == boost::asio::error::operation_aborted)
+        co_return;
+      std::cerr << "acceptor error" << std::endl;
+      co_return;
+    }
+
+    boost::asio::co_spawn(
+        std::move(strand),
+        detechSession(socketStreamType{std::move(socket)}, ctx),
+        taskGroup.adapt([](std::exception_ptr e) {
+          if (e) {
+            try {
+              std::rethrow_exception(e);
+            } catch (const std::exception &ec) {
+              std::cerr << ec.what() << std::endl;
+              std::cerr << "co_spawn error from detect session..." << std::endl;
+              return;
+            }
+          }
+        }));
+  }
+  co_return;
+}
+
+inline boost::asio::awaitable<void, Server::executorType>
+Server::detechSession(socketStreamType &&socket,
+                      boost::asio::ssl::context &ctx) {
+
+  co_await boost::asio::this_coro::reset_cancellation_state(
+      boost::asio::enable_total_cancellation(),
+      boost::asio::enable_terminal_cancellation());
+
+  co_await boost::asio::this_coro::throw_if_cancelled(false);
+
+  boost::beast::flat_buffer flatBuffer;
+  socketStreamType socketStream{std::move(socket)};
+
+  socketStream.expires_after(std::chrono::seconds(60));
+
+  if (co_await boost::beast::async_detect_ssl(socketStream, flatBuffer)) {
+
+    boost::asio::ssl::stream<socketStreamType> socketSslStream(
+        std::move(socketStream), ctx);
+
+    auto size = co_await socketSslStream.async_handshake(
+        boost::asio::ssl::stream_base::handshake_type::server,
+        flatBuffer.data());
+
+    flatBuffer.consume(size);
+    // start session.
+    co_await httpsSession(flatBuffer, socketSslStream);
+
+    if (socketSslStream.lowest_layer().is_open()) {
+      boost::system::error_code ec;
+
+      co_await socketSslStream.async_shutdown(boost::asio::redirect_error(ec));
+      if (ec && ec != boost::asio::ssl::error::stream_truncated) {
+        throw boost::system::system_error(ec);
+      }
+    }
+  }
+  // co_await httpsSession(flatBuffer, socketStream);
+}
+
+inline void Server::addHandleRequest(
+    const std::function<functionType(
+        boost::beast::http::request<boost::beast::http::string_body> &,
+        boost::mysql::connection_pool &)> &func) {
+  m_handleList.push_back(std::move(func));
+}
+
+inline void Server::addHandleRequest(std::string path, rget req) {
+  m_routes.push_back(
+      std::make_pair<std::string, rget>(std::move(path), std::move(req)));
+}
