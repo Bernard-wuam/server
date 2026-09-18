@@ -59,9 +59,10 @@ FetchContent_MakeAvailable(
 find_package(boost_beast CONFIG REQUIRED)
 find_package(boost_mysql CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(boost_url CONFIG REQUIRED)
 
 target_link_libraries(Server INTERFACE Boost::beast OpenSSL::SSL
-    OpenSSL::Crypto HandleSignals::HandleSignals ServerError::ServerError
+    OpenSSL::Crypto HandleSignals::HandleSignals ServerError::ServerError Boost::url
     ServerUtilities::ServerUtilities LoadServerCertificate::LoadServerCertificate
     JsonResponse::JsonResponse RegexTarget::RegexTarget Boost::mysql)
 

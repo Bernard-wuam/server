@@ -37,15 +37,112 @@
 #include <boost/none.hpp>
 #include <boost/system/detail/error_code.hpp>
 #include <boost/system/system_error.hpp>
+#include <boost/url.hpp>
+#include <boost/url/params_view.hpp>
+#include <boost/url/parse.hpp>
 #include <chrono>
 #include <exception>
 #include <functional>
 #include <iostream>
 #include <optional>
+#include <string>
+#include <system_error>
 #include <taskgroup/taskgroup.h>
+#include <utility>
 #include <vector>
 
+class GetRequest {
+
+  std::vector<std::pair<std::string, std::string>> m_paramsList;
+  boost::urls::params_view m_QueryList;
+
+public:
+  std::optional<std::vector<std::pair<std::string, std::string>>>
+  params(std::error_code &ec) const {
+    if (m_paramsList.empty()) {
+      ec = std::make_error_code(std::errc::invalid_argument);
+      return std::nullopt;
+    }
+    return m_paramsList;
+  }
+
+  std::optional<boost::urls::params_view> queries(std::error_code &ec) const {
+    if (m_QueryList.empty()) {
+      ec = std::make_error_code(std::errc::invalid_argument);
+      return std::nullopt;
+    }
+    return m_QueryList;
+  }
+
+  void setParams(const std::vector<std::pair<std::string, std::string>> &vec) {
+    m_paramsList = vec;
+  }
+
+  void setQueries(const boost::urls::params_view &querries) {
+    m_QueryList = querries;
+  }
+
+  void addParams(const std::pair<std::string, std::string> &val) {
+    m_paramsList.push_back(val);
+  }
+};
+
 class Server {
+
+  std::optional<boost::urls::params_view>
+  getQueries(const std::string &target) {
+    auto c = boost::urls::parse_relative_ref(target);
+    if (c.has_error() || !c->has_query())
+      return std::nullopt;
+    return c.value().params();
+  }
+
+  std::optional<std::vector<std::pair<std::string, std::string>>>
+  getParams(std::string path, std::string target) {
+    if (path.find(':') == std::string::npos)
+      return std::nullopt;
+
+    std::cout << "stred" << std::endl;
+
+    auto paths = boost::urls::parse_relative_ref(path);
+    if (paths.has_error())
+      return std::nullopt;
+
+    std::vector<std::string> vecPath(paths.value().segments().begin(),
+                                     paths.value().segments().end());
+    if (vecPath.empty())
+      return std::nullopt;
+    auto targets = boost::urls::parse_relative_ref(target);
+    if (targets.has_error())
+      return std::nullopt;
+
+    std::vector<std::string> vecTarget(targets.value().segments().begin(),
+                                       targets.value().segments().end());
+    if (vecTarget.empty())
+      return std::nullopt;
+
+    std::cout << "reached " << std::endl;
+
+    if (vecTarget.size() != vecPath.size())
+      return std::nullopt;
+
+    std::cout << "reached 1" << std::endl;
+
+    std::vector<std::pair<std::string, std::string>> list;
+
+    for (int i = 0; i < vecPath.size(); i++) {
+      if (auto index = vecPath[i].find(':') != std::string::npos) {
+        auto key = vecPath[i].substr(index);
+        auto value = vecTarget[i];
+        list.push_back(std::make_pair(key, value));
+      } else {
+        if (vecPath[i] != vecTarget[i])
+          return std::nullopt;
+      }
+    }
+
+    return list;
+  };
 
   boost::mysql::connection_pool &m_connectionPool;
 
@@ -62,6 +159,15 @@ class Server {
       boost::beast::http::response<boost::beast::http::string_body>>;
 
   using functionType = boost::asio::awaitable<returnType, executorType>;
+
+  using rgetReqType = boost::asio::awaitable<
+      boost::beast::http::response<boost::beast::http::string_body>,
+      executorType>;
+
+  using rget =
+      std::function<rgetReqType(GetRequest &, boost::mysql::connection_pool &)>;
+
+  std::vector<std::pair<std::string, rget>> m_routes;
 
   std::vector<std::function<functionType(
       boost::beast::http::request<boost::beast::http::string_body> &,
@@ -104,16 +210,104 @@ class Server {
       }
       bool keepAlive = false;
 
-      for (auto &c : m_handleList) {
-        auto resOptional = co_await c(reqParser.get(), m_connectionPool);
+      // for (auto &c : m_handleList) {
+      //   auto resOptional = co_await c(reqParser.get(), m_connectionPool);
 
-        if (resOptional.has_value()) {
-          keepAlive = resOptional.value().keep_alive();
-          auto writeSize = co_await boost::beast::http::async_write(
-              socketStream, resOptional.value(),
-              boost::asio::redirect_error(ec));
+      //   if (resOptional.has_value()) {
+      //     keepAlive = resOptional.value().keep_alive();
+      //     auto writeSize = co_await boost::beast::http::async_write(
+      //         socketStream, resOptional.value(),
+      //         boost::asio::redirect_error(ec));
 
-          break;
+      //     break;
+      //   }
+      // }
+
+      for (auto &c : m_routes) {
+        auto path = std::get<0>(c);
+        auto func = std::get<1>(c);
+
+        // std::string target = reqParser.get().target();
+        auto targetHasQueries = getQueries(reqParser.get().target());
+
+        if (targetHasQueries.has_value()) {
+          std::cout << "has querries,,," << std::endl;
+          auto pathHasParams = getParams(path, reqParser.get().target());
+
+          if (pathHasParams.has_value()) {
+
+            std::cout << "has params\n";
+            std::cout << "has querres\n";
+            // has params
+            // has querries
+
+            // create the GetRequest and await the function result;
+
+            GetRequest req;
+            req.setParams(pathHasParams.value());
+            req.setQueries(targetHasQueries.value());
+
+            auto res = co_await func(req, m_connectionPool);
+
+            keepAlive = res.keep_alive();
+            auto writeSize = co_await boost::beast::http::async_write(
+                socketStream, res, boost::asio::redirect_error(ec));
+            break;
+          }
+
+          std::cout << boost::urls::parse_uri_reference(
+                           reqParser.get().target())
+                           ->path()
+                    << std::endl;
+
+          if (path == boost::urls::parse_uri_reference(reqParser.get().target())
+                          ->path()) {
+            // do not have a params but querries.
+            // set the querries and wait on the func.
+
+            std::cout << "has only querres\n";
+
+            GetRequest req;
+            // req.setParams(pathHasParams.value());
+            req.setQueries(targetHasQueries.value());
+
+            auto res = co_await func(req, m_connectionPool);
+
+            keepAlive = res.keep_alive();
+            auto writeSize = co_await boost::beast::http::async_write(
+                socketStream, res, boost::asio::redirect_error(ec));
+            std::cout << "after writing" << std::endl;
+            break;
+          }
+
+        } else {
+          auto hasParams = getParams(path, reqParser.get().target());
+
+          if (hasParams.has_value()) {
+            std::cout << "has only params" << std::endl;
+            GetRequest req;
+            req.setParams(hasParams.value());
+            auto res = co_await func(req, m_connectionPool);
+
+            keepAlive = res.keep_alive();
+            auto writeSize = co_await boost::beast::http::async_write(
+                socketStream, res, boost::asio::redirect_error(ec));
+            std::cout << "after writing" << std::endl;
+            break;
+          }
+          if (path == reqParser.get().target()) {
+
+            std::cout << "just plain reques\n";
+
+            // do not have params and querries
+            GetRequest req;
+            auto res = co_await func(req, m_connectionPool);
+
+            keepAlive = res.keep_alive();
+            auto writeSize = co_await boost::beast::http::async_write(
+                socketStream, res, boost::asio::redirect_error(ec));
+            break;
+          }
         }
       }
 
@@ -219,4 +413,14 @@ public:
           boost::mysql::connection_pool &)> &func) {
     m_handleList.push_back(std::move(func));
   }
+  void addHandleRequest(std::string path, rget req) {
+    // std::pair<std::string,rget> m(path,req);
+    // m_routes.push_back(m);
+    m_routes.push_back(
+        std::make_pair<std::string, rget>(std::move(path), std::move(req)));
+  }
+
+  // GetRequest resolvePath(const std::string &path) {
+  //   // /users/:id/company/
+  // }
 }; // namespace Server
