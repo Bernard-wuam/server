@@ -1,5 +1,6 @@
 #pragma once
 
+#include "servererror/servererror.h"
 #include <boost/asio.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/cancellation_state.hpp>
@@ -32,6 +33,9 @@
 #include <boost/beast/http/parser_fwd.hpp>
 #include <boost/beast/http/status.hpp>
 #include <boost/beast/http/string_body_fwd.hpp>
+#include <boost/beast/http/verb.hpp>
+#include <boost/json.hpp>
+#include <boost/json/object.hpp>
 #include <boost/mysql.hpp>
 #include <boost/mysql/connection_pool.hpp>
 #include <boost/none.hpp>
@@ -57,38 +61,67 @@ class GetRequest {
 
   std::vector<std::pair<std::string, std::string>> m_paramsList;
   boost::urls::params_view m_QueryList;
+  boost::json::object m_body;
 
-  void setParams(const std::vector<std::pair<std::string, std::string>> &vec) {
-    m_paramsList = vec;
-  }
-  void setQueries(const boost::urls::params_view &querries) {
-    m_QueryList = querries;
-  }
+  void setParams(const std::vector<std::pair<std::string, std::string>> &);
+  void setQueries(const boost::urls::params_view &);
 
-  void addParams(const std::pair<std::string, std::string> &val) {
-    m_paramsList.push_back(val);
-  }
+  void addParams(const std::pair<std::string, std::string> &);
+
+  void setBody(const boost::json::object &object);
 
 public:
   std::optional<std::vector<std::pair<std::string, std::string>>>
-  params(std::error_code &ec) const {
-    if (m_paramsList.empty()) {
-      ec = std::make_error_code(std::errc::invalid_argument);
-      return std::nullopt;
-    }
-    return m_paramsList;
-  }
+  params(std::error_code &ec) const;
 
-  std::optional<boost::urls::params_view> queries(std::error_code &ec) const {
-    if (m_QueryList.empty()) {
-      ec = std::make_error_code(std::errc::invalid_argument);
-      return std::nullopt;
-    }
-    return m_QueryList;
-  }
+  std::optional<boost::urls::params_view> queries(std::error_code &) const;
+  std::optional<boost::json::object> body(std::error_code &) const;
 
   friend class Server;
 };
+
+inline void GetRequest::setBody(const boost::json::object &object) {
+  m_body = object;
+}
+
+inline void
+GetRequest::addParams(const std::pair<std::string, std::string> &val) {
+  m_paramsList.push_back(val);
+}
+inline void GetRequest::setQueries(const boost::urls::params_view &querries) {
+  m_QueryList = querries;
+}
+inline void GetRequest::setParams(
+    const std::vector<std::pair<std::string, std::string>> &vec) {
+  m_paramsList = vec;
+}
+
+inline std::optional<std::vector<std::pair<std::string, std::string>>>
+GetRequest::params(std::error_code &ec) const {
+  if (m_paramsList.empty()) {
+    ec = std::make_error_code(std::errc::invalid_argument);
+    return std::nullopt;
+  }
+  return m_paramsList;
+}
+
+inline std::optional<boost::urls::params_view>
+GetRequest::queries(std::error_code &ec) const {
+  if (m_QueryList.empty()) {
+    ec = std::make_error_code(std::errc::invalid_argument);
+    return std::nullopt;
+  }
+  return m_QueryList;
+}
+
+inline std::optional<boost::json::object>
+GetRequest::body(std::error_code &ec) const {
+  if (m_body.empty()) {
+    ec = makeErrorCode(ServerError::Convert_Body_To_Object_Failed);
+    return std::nullopt;
+  }
+  return m_body;
+}
 
 class Server {
 
@@ -96,6 +129,10 @@ class Server {
 
   std::optional<std::vector<std::pair<std::string, std::string>>>
       getParams(std::string, std::string);
+
+  std::optional<boost::json::object> convertBodyToObject(
+      const boost::beast::http::request<boost::beast::http::string_body> &,
+      std::error_code &);
 
   boost::mysql::connection_pool &m_connectionPool;
 
@@ -120,21 +157,15 @@ class Server {
   using rget =
       std::function<rgetReqType(GetRequest &, boost::mysql::connection_pool &)>;
 
-  std::vector<std::pair<std::string, rget>> m_routes;
+  std::vector<std::pair<std::string, rget>> m_getRoutes;
+  std::vector<std::pair<std::string, rget>> m_postRoutes;
+  std::vector<std::pair<std::string, rget>> m_putRoutes;
+  std::vector<std::pair<std::string, rget>> m_deleteRoutes;
 
   std::vector<std::function<functionType(
       boost::beast::http::request<boost::beast::http::string_body> &,
       boost::mysql::connection_pool &)>>
       m_handleList;
-  // handle session is a function that take a string and return's a /*return
-  // value*/.
-
-  // boost::asio::awaitable<void, executorType> handleRequest(
-  //     boost::beast::http::request<boost::beast::http::string_body> &request)
-  //     {
-
-  //   co_return;
-  // }
 
   template <typename Stream>
   boost::asio::awaitable<void, executorType>
@@ -150,15 +181,19 @@ public:
   startServer(boost::asio::ssl::context &, boost::asio::ip::tcp::endpoint &,
               TaskGroup &);
 
-  void setParams(GetRequest &req,
-                 std::vector<std::pair<std::string, std::string>> paramsList);
+  // void setParams(GetRequest &req,
+  //                std::vector<std::pair<std::string, std::string>>
+  //                paramsList);
 
   void addHandleRequest(
       const std::function<functionType(
           boost::beast::http::request<boost::beast::http::string_body> &,
           boost::mysql::connection_pool &)> &);
 
-  void addHandleRequest(std::string, rget);
+  void get(std::string, rget);
+  void post(std::string, rget);
+  void put(std::string, rget);
+  void delete_(std::string, rget);
 
   // GetRequest resolvePath(const std::string &path) {
   //   // /users/:id/company/
@@ -244,20 +279,26 @@ Server::httpsSession(boost::beast::flat_buffer &buffer, Stream &socketStream) {
     }
     bool keepAlive = false;
 
-    // for (auto &c : m_handleList) {
-    //   auto resOptional = co_await c(reqParser.get(), m_connectionPool);
+    std::vector<std::pair<std::string, rget>> routes;
 
-    //   if (resOptional.has_value()) {
-    //     keepAlive = resOptional.value().keep_alive();
-    //     auto writeSize = co_await boost::beast::http::async_write(
-    //         socketStream, resOptional.value(),
-    //         boost::asio::redirect_error(ec));
+    if (reqParser.get().method() == boost::beast::http::verb::get) {
+      routes = m_getRoutes;
+    } else if (reqParser.get().method() == boost::beast::http::verb::post) {
+      routes = m_postRoutes;
+    } else if (reqParser.get().method() == boost::beast::http::verb::put) {
+      routes = m_putRoutes;
+    } else if (reqParser.get().method() == boost::beast::http::verb::delete_) {
+      routes = m_deleteRoutes;
+    }
 
-    //     break;
-    //   }
-    // }
+    GetRequest req;
+    // get the body from the request.
 
-    for (auto &c : m_routes) {
+    auto body = convertBodyToObject(reqParser.get(), ec);
+    if (body.has_value())
+      req.setBody(body.value());
+
+    for (auto &c : routes) {
       auto path = std::get<0>(c);
       auto func = std::get<1>(c);
 
@@ -269,26 +310,31 @@ Server::httpsSession(boost::beast::flat_buffer &buffer, Stream &socketStream) {
 
       std::cout << "path: " << target << std::endl;
 
-      GetRequest req;
-
       if (targetHasQueries.has_value()) {
 
         req.setQueries(targetHasQueries.value());
 
-        // auto target =
-        //     boost::urls::parse_relative_ref(reqParser.get().target())->path();
-        // auto hasParams = getParams(path, target);
-
         if (hasParams.has_value()) {
           req.setParams(hasParams.value());
-          auto res = co_await func(req, m_connectionPool);
-
-          keepAlive = res.keep_alive();
-          auto writeSize = co_await boost::beast::http::async_write(
-              socketStream, res, boost::asio::redirect_error(ec));
-          break;
         }
+        auto res = co_await func(req, m_connectionPool);
+
+        keepAlive = res.keep_alive();
+        auto writeSize = co_await boost::beast::http::async_write(
+            socketStream, res, boost::asio::redirect_error(ec));
+        break;
       }
+
+      if (hasParams.has_value()) {
+        req.setParams(hasParams.value());
+        auto res = co_await func(req, m_connectionPool);
+
+        keepAlive = res.keep_alive();
+        auto writeSize = co_await boost::beast::http::async_write(
+            socketStream, res, boost::asio::redirect_error(ec));
+        break;
+      };
+
       if (path == target) {
         auto res = co_await func(req, m_connectionPool);
 
@@ -398,7 +444,40 @@ inline void Server::addHandleRequest(
   m_handleList.push_back(std::move(func));
 }
 
-inline void Server::addHandleRequest(std::string path, rget req) {
-  m_routes.push_back(
+inline void Server::get(std::string path, rget req) {
+  m_getRoutes.push_back(
       std::make_pair<std::string, rget>(std::move(path), std::move(req)));
+}
+
+inline void Server::post(std::string path, rget req) {
+  m_postRoutes.push_back(
+      std::make_pair<std::string, rget>(std::move(path), std::move(req)));
+}
+
+inline void Server::put(std::string path, rget req) {
+  m_putRoutes.push_back(
+      std::make_pair<std::string, rget>(std::move(path), std::move(req)));
+}
+
+inline void Server::delete_(std::string path, rget req) {
+  m_deleteRoutes.push_back(
+      std::make_pair<std::string, rget>(std::move(path), std::move(req)));
+}
+
+inline std::optional<boost::json::object> Server::convertBodyToObject(
+    const boost::beast::http::request<boost::beast::http::string_body> &request,
+    std::error_code &ec) {
+  boost::beast::error_code ecc;
+
+  auto obj = boost::json::parse(request.body(), ecc);
+  if (ecc) {
+    ec = makeErrorCode(ServerError::Convert_Body_To_Object_Failed);
+    return std::nullopt;
+  }
+  auto tryVal = obj.try_as_object();
+  if (tryVal.has_error()) {
+    ec = makeErrorCode(ServerError::Convert_Body_To_Object_Failed);
+    return std::nullopt;
+  }
+  return tryVal.value();
 }
