@@ -181,8 +181,6 @@ Server::getParams(std::string path, std::string target) {
   if (path.find(':') == std::string::npos)
     return std::nullopt;
 
-  std::cout << "stred" << std::endl;
-
   auto paths = boost::urls::parse_relative_ref(path);
   if (paths.has_error())
     return std::nullopt;
@@ -200,12 +198,8 @@ Server::getParams(std::string path, std::string target) {
   if (vecTarget.empty())
     return std::nullopt;
 
-  std::cout << "reached " << std::endl;
-
   if (vecTarget.size() != vecPath.size())
     return std::nullopt;
-
-  std::cout << "reached 1" << std::endl;
 
   std::vector<std::pair<std::string, std::string>> list;
 
@@ -269,84 +263,39 @@ Server::httpsSession(boost::beast::flat_buffer &buffer, Stream &socketStream) {
 
       // std::string target = reqParser.get().target();
       auto targetHasQueries = getQueries(reqParser.get().target());
+      auto target =
+          boost::urls::parse_relative_ref(reqParser.get().target())->path();
+      auto hasParams = getParams(path, target);
+
+      std::cout << "path: " << target << std::endl;
+
+      GetRequest req;
 
       if (targetHasQueries.has_value()) {
-        std::cout << "has querries,,," << std::endl;
-        auto pathHasParams = getParams(path, reqParser.get().target());
 
-        if (pathHasParams.has_value()) {
+        req.setQueries(targetHasQueries.value());
 
-          std::cout << "has params\n";
-          std::cout << "has querres\n";
-          // has params
-          // has querries
-
-          // create the GetRequest and await the function result;
-
-          GetRequest req;
-          req.setParams(pathHasParams.value());
-          req.setQueries(targetHasQueries.value());
-
-          auto res = co_await func(req, m_connectionPool);
-
-          keepAlive = res.keep_alive();
-          auto writeSize = co_await boost::beast::http::async_write(
-              socketStream, res, boost::asio::redirect_error(ec));
-          break;
-        }
-
-        std::cout << boost::urls::parse_uri_reference(reqParser.get().target())
-                         ->path()
-                  << std::endl;
-
-        if (path == boost::urls::parse_uri_reference(reqParser.get().target())
-                        ->path()) {
-          // do not have a params but querries.
-          // set the querries and wait on the func.
-
-          std::cout << "has only querres\n";
-
-          GetRequest req;
-          // req.setParams(pathHasParams.value());
-          req.setQueries(targetHasQueries.value());
-
-          auto res = co_await func(req, m_connectionPool);
-
-          keepAlive = res.keep_alive();
-          auto writeSize = co_await boost::beast::http::async_write(
-              socketStream, res, boost::asio::redirect_error(ec));
-          std::cout << "after writing" << std::endl;
-          break;
-        }
-
-      } else {
-        auto hasParams = getParams(path, reqParser.get().target());
+        // auto target =
+        //     boost::urls::parse_relative_ref(reqParser.get().target())->path();
+        // auto hasParams = getParams(path, target);
 
         if (hasParams.has_value()) {
-          std::cout << "has only params" << std::endl;
-          GetRequest req;
           req.setParams(hasParams.value());
           auto res = co_await func(req, m_connectionPool);
 
           keepAlive = res.keep_alive();
           auto writeSize = co_await boost::beast::http::async_write(
               socketStream, res, boost::asio::redirect_error(ec));
-          std::cout << "after writing" << std::endl;
           break;
         }
-        if (path == reqParser.get().target()) {
+      }
+      if (path == target) {
+        auto res = co_await func(req, m_connectionPool);
 
-          std::cout << "just plain reques\n";
-
-          // do not have params and querries
-          GetRequest req;
-          auto res = co_await func(req, m_connectionPool);
-
-          keepAlive = res.keep_alive();
-          auto writeSize = co_await boost::beast::http::async_write(
-              socketStream, res, boost::asio::redirect_error(ec));
-          break;
-        }
+        keepAlive = res.keep_alive();
+        auto writeSize = co_await boost::beast::http::async_write(
+            socketStream, res, boost::asio::redirect_error(ec));
+        break;
       }
     }
 
