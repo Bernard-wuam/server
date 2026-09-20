@@ -208,7 +208,7 @@ Server::getQueries(const std::string &target) {
   auto c = boost::urls::parse_relative_ref(target);
   if (c.has_error() || !c->has_query())
     return std::nullopt;
-  return c.value().params();
+  return std::move(c.value().params());
 }
 
 inline std::optional<std::vector<std::pair<std::string, std::string>>>
@@ -304,25 +304,24 @@ Server::httpsSession(boost::beast::flat_buffer &buffer, Stream &socketStream) {
 
       // std::string target = reqParser.get().target();
       auto targetHasQueries = getQueries(reqParser.get().target());
+
       auto target =
           boost::urls::parse_relative_ref(reqParser.get().target())->path();
+
       auto hasParams = getParams(path, target);
 
-      std::cout << "path: " << target << std::endl;
-
       if (targetHasQueries.has_value()) {
-
-        req.setQueries(targetHasQueries.value());
+        req.setQueries(boost::urls::parse_relative_ref(reqParser.get().target())
+                           ->params());
 
         if (hasParams.has_value()) {
           req.setParams(hasParams.value());
+          auto res = co_await func(req, m_connectionPool);
+          keepAlive = res.keep_alive();
+          auto writeSize = co_await boost::beast::http::async_write(
+              socketStream, res, boost::asio::redirect_error(ec));
+          break;
         }
-        auto res = co_await func(req, m_connectionPool);
-
-        keepAlive = res.keep_alive();
-        auto writeSize = co_await boost::beast::http::async_write(
-            socketStream, res, boost::asio::redirect_error(ec));
-        break;
       }
 
       if (hasParams.has_value()) {
