@@ -26,6 +26,7 @@
 #include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/error.hpp>
+#include <boost/beast/http/fields_fwd.hpp>
 #include <boost/beast/http/impl/error.hpp>
 #include <boost/beast/http/impl/read.hpp>
 #include <boost/beast/http/impl/write.hpp>
@@ -52,18 +53,22 @@
 #include <string>
 #include <system_error>
 #include <taskgroup/taskgroup.h>
+#include <unordered_map>
 #include <utility>
 #include <vector>
+#include <ranges>
+#include <jwt-cpp/jwt.h>
+#include <jwt-cpp/traits/boost-json/traits.h>
 
 class Server;
 
 class GetRequest {
 
-  std::vector<std::pair<std::string, std::string>> m_paramsList;
+  std::unordered_map<std::string, std::string> m_paramsList;
   boost::urls::params_view m_QueryList;
   boost::json::object m_body;
 
-  void setParams(const std::vector<std::pair<std::string, std::string>> &);
+  void setParams(const std::unordered_map<std::string, std::string> &);
   void setQueries(const boost::urls::params_view &);
 
   void addParams(const std::pair<std::string, std::string> &);
@@ -71,7 +76,7 @@ class GetRequest {
   void setBody(const boost::json::object &object);
 
 public:
-  std::optional<std::vector<std::pair<std::string, std::string>>>
+  std::optional<std::unordered_map<std::string, std::string>>
   params(std::error_code &ec) const;
 
   std::optional<boost::urls::params_view> queries(std::error_code &) const;
@@ -86,17 +91,17 @@ inline void GetRequest::setBody(const boost::json::object &object) {
 
 inline void
 GetRequest::addParams(const std::pair<std::string, std::string> &val) {
-  m_paramsList.push_back(val);
+  m_paramsList.insert(val);
 }
 inline void GetRequest::setQueries(const boost::urls::params_view &querries) {
   m_QueryList = querries;
 }
 inline void GetRequest::setParams(
-    const std::vector<std::pair<std::string, std::string>> &vec) {
+    const std::unordered_map<std::string, std::string> &vec) {
   m_paramsList = vec;
 }
 
-inline std::optional<std::vector<std::pair<std::string, std::string>>>
+inline std::optional<std::unordered_map<std::string, std::string>>
 GetRequest::params(std::error_code &ec) const {
   if (m_paramsList.empty()) {
     ec = std::make_error_code(std::errc::invalid_argument);
@@ -127,7 +132,7 @@ class Server {
 
   std::optional<boost::urls::params_view> getQueries(const std::string &);
 
-  std::optional<std::vector<std::pair<std::string, std::string>>>
+  std::optional<std::unordered_map<std::string, std::string>>
       getParams(std::string, std::string);
 
   std::optional<boost::json::object> convertBodyToObject(
@@ -195,6 +200,12 @@ public:
   void put(std::string, rget);
   void delete_(std::string, rget);
 
+  std::optional<boost::json::object> verifyJwt(
+      boost::beast::http::request<boost::beast::http::string_body> &request,
+      const std::string &secret, const std::string &issuer,
+      const std::string &audience, const std::string &payloadName,
+      std::error_code &ec);
+
   // GetRequest resolvePath(const std::string &path) {
   //   // /users/:id/company/
   // }
@@ -211,7 +222,7 @@ Server::getQueries(const std::string &target) {
   return std::move(c.value().params());
 }
 
-inline std::optional<std::vector<std::pair<std::string, std::string>>>
+inline std::optional<std::unordered_map<std::string, std::string>>
 Server::getParams(std::string path, std::string target) {
   if (path.find(':') == std::string::npos)
     return std::nullopt;
@@ -236,13 +247,13 @@ Server::getParams(std::string path, std::string target) {
   if (vecTarget.size() != vecPath.size())
     return std::nullopt;
 
-  std::vector<std::pair<std::string, std::string>> list;
+  std::unordered_map<std::string, std::string> list;
 
   for (int i = 0; i < vecPath.size(); i++) {
     if (auto index = vecPath[i].find(':') != std::string::npos) {
       auto key = vecPath[i].substr(index);
       auto value = vecTarget[i];
-      list.push_back(std::make_pair(key, value));
+      list.insert(std::make_pair(key, value));
     } else {
       if (vecPath[i] != vecTarget[i])
         return std::nullopt;
@@ -480,3 +491,55 @@ inline std::optional<boost::json::object> Server::convertBodyToObject(
   }
   return tryVal.value();
 }
+
+inline std::optional<boost::json::object> Server::verifyJwt(
+    boost::beast::http::request<boost::beast::http::string_body> &request,
+    const std::string &secret, const std::string &issuer,
+    const std::string &audience, const std::string &payloadName,
+    std::error_code &ec) {
+  std::string bearer = request[boost::beast::http::field::authorization];
+
+  if (bearer.empty()) {
+    ec = makeErrorCode(ServerError::Unauthorize_Access);
+    return std::nullopt;
+  }
+
+  auto parts = bearer | std::ranges::views::split(' ');
+  // std::vector<std::string_view> vecList(parts.begin(),parts.end());
+
+  if (std::ranges::distance(parts) != 2) {
+    ec = makeErrorCode(ServerError::Unauthorize_Access);
+    return std::nullopt;
+  }
+  auto it = parts.begin();
+  auto bearerIt = std::ranges::next(it, 1);
+
+  std::string_view token(*bearerIt);
+  std::error_code ecc;
+  try {
+
+    auto decoded_token = jwt::decode<jwt::traits::boost_json>(token.data());
+    auto verifier = jwt::verify<jwt::traits::boost_json>()
+                        .with_issuer(issuer)
+                        .with_audience(audience)
+                        .allow_algorithm(jwt::algorithm::hs256{secret})
+                        .expires_at_leeway(0);
+
+    verifier.verify(decoded_token, ecc);
+
+    if (ecc) {
+      std::cout << ec.message() << std::endl;
+      if (ecc == jwt::error::token_verification_error::token_expired)
+        ec = makeErrorCode(ServerError::AccessToken_Expired);
+      return std::nullopt;
+    }
+
+    auto val = decoded_token.get_payload_claim(payloadName).to_json();
+
+    return val.as_object();
+  } catch (const std::exception &ec) {
+  };
+
+  ec = makeErrorCode(ServerError::Invalid_AcessToken);
+  return std::nullopt;
+};
