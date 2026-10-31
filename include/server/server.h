@@ -26,6 +26,7 @@
 #include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/error.hpp>
+#include <boost/beast/http/field.hpp>
 #include <boost/beast/http/fields_fwd.hpp>
 #include <boost/beast/http/impl/error.hpp>
 #include <boost/beast/http/impl/read.hpp>
@@ -49,16 +50,16 @@
 #include <exception>
 #include <functional>
 #include <iostream>
+#include <jwt-cpp/jwt.h>
+#include <jwt-cpp/traits/boost-json/traits.h>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <system_error>
 #include <taskgroup/taskgroup.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <ranges>
-#include <jwt-cpp/jwt.h>
-#include <jwt-cpp/traits/boost-json/traits.h>
 
 class Server;
 
@@ -67,6 +68,7 @@ class GetRequest {
   std::unordered_map<std::string, std::string> m_paramsList;
   boost::urls::params_view m_QueryList;
   boost::json::object m_body;
+  std::string m_token;
 
   void setParams(const std::unordered_map<std::string, std::string> &);
   void setQueries(const boost::urls::params_view &);
@@ -74,6 +76,7 @@ class GetRequest {
   void addParams(const std::pair<std::string, std::string> &);
 
   void setBody(const boost::json::object &object);
+  void setToken(const std::string &token);
 
 public:
   std::optional<std::unordered_map<std::string, std::string>>
@@ -81,6 +84,12 @@ public:
 
   std::optional<boost::urls::params_view> queries(std::error_code &) const;
   std::optional<boost::json::object> body(std::error_code &) const;
+
+  std::optional<boost::json::object> verifyJwt(const std::string &secret,
+                                               const std::string &issuer,
+                                               const std::string &audience,
+                                               const std::string &payloadName,
+                                               std::error_code &ec);
 
   friend class Server;
 };
@@ -96,8 +105,8 @@ GetRequest::addParams(const std::pair<std::string, std::string> &val) {
 inline void GetRequest::setQueries(const boost::urls::params_view &querries) {
   m_QueryList = querries;
 }
-inline void GetRequest::setParams(
-    const std::unordered_map<std::string, std::string> &vec) {
+inline void
+GetRequest::setParams(const std::unordered_map<std::string, std::string> &vec) {
   m_paramsList = vec;
 }
 
@@ -127,6 +136,48 @@ GetRequest::body(std::error_code &ec) const {
   }
   return m_body;
 }
+
+inline void GetRequest::setToken(const std::string &token) { m_token = token; };
+
+inline std::optional<boost::json::object>
+GetRequest::verifyJwt(const std::string &secret, const std::string &issuer,
+                      const std::string &audience,
+                      const std::string &payloadName, std::error_code &ec) {
+ 
+
+  if (m_token.empty()) {
+    ec = makeErrorCode(ServerError::Unauthorize_Access);
+    return std::nullopt;
+  }
+
+  std::error_code ecc;
+  try {
+
+    auto decoded_token = jwt::decode<jwt::traits::boost_json>(m_token.data());
+    auto verifier = jwt::verify<jwt::traits::boost_json>()
+                        .with_issuer(issuer)
+                        .with_audience(audience)
+                        .allow_algorithm(jwt::algorithm::hs256{secret})
+                        .expires_at_leeway(0);
+
+    verifier.verify(decoded_token, ecc);
+
+    if (ecc) {
+      std::cout << ec.message() << std::endl;
+      if (ecc == jwt::error::token_verification_error::token_expired)
+        ec = makeErrorCode(ServerError::AccessToken_Expired);
+      return std::nullopt;
+    }
+
+    auto val = decoded_token.get_payload_claim(payloadName).to_json();
+
+    return val.as_object();
+  } catch (const std::exception &ec) {
+  };
+
+  ec = makeErrorCode(ServerError::Invalid_AcessToken);
+  return std::nullopt;
+};
 
 class Server {
 
@@ -199,12 +250,6 @@ public:
   void post(std::string, rget);
   void put(std::string, rget);
   void delete_(std::string, rget);
-
-  std::optional<boost::json::object> verifyJwt(
-      boost::beast::http::request<boost::beast::http::string_body> &request,
-      const std::string &secret, const std::string &issuer,
-      const std::string &audience, const std::string &payloadName,
-      std::error_code &ec);
 
   // GetRequest resolvePath(const std::string &path) {
   //   // /users/:id/company/
@@ -304,6 +349,18 @@ Server::httpsSession(boost::beast::flat_buffer &buffer, Stream &socketStream) {
 
     GetRequest req;
     // get the body from the request.
+    std::string bearer =
+        reqParser.get()[boost::beast::http::field::authorization];
+
+    if (!bearer.empty()) {
+      auto parts = std::views::split(bearer, ' ');
+      std::vector<std::string_view> vecList(parts.begin(), parts.end());
+
+      if (vecList.size() == 2) {
+        auto token = vecList[1];
+        req.setToken(std::string(token));
+      }
+    }
 
     auto body = convertBodyToObject(reqParser.get(), ec);
     if (body.has_value())
@@ -489,57 +546,6 @@ inline std::optional<boost::json::object> Server::convertBodyToObject(
     ec = makeErrorCode(ServerError::Convert_Body_To_Object_Failed);
     return std::nullopt;
   }
+
   return tryVal.value();
 }
-
-inline std::optional<boost::json::object> Server::verifyJwt(
-    boost::beast::http::request<boost::beast::http::string_body> &request,
-    const std::string &secret, const std::string &issuer,
-    const std::string &audience, const std::string &payloadName,
-    std::error_code &ec) {
-  std::string bearer = request[boost::beast::http::field::authorization];
-
-  if (bearer.empty()) {
-    ec = makeErrorCode(ServerError::Unauthorize_Access);
-    return std::nullopt;
-  }
-
-  auto parts = bearer | std::ranges::views::split(' ');
-  // std::vector<std::string_view> vecList(parts.begin(),parts.end());
-
-  if (std::ranges::distance(parts) != 2) {
-    ec = makeErrorCode(ServerError::Unauthorize_Access);
-    return std::nullopt;
-  }
-  auto it = parts.begin();
-  auto bearerIt = std::ranges::next(it, 1);
-
-  std::string_view token(*bearerIt);
-  std::error_code ecc;
-  try {
-
-    auto decoded_token = jwt::decode<jwt::traits::boost_json>(token.data());
-    auto verifier = jwt::verify<jwt::traits::boost_json>()
-                        .with_issuer(issuer)
-                        .with_audience(audience)
-                        .allow_algorithm(jwt::algorithm::hs256{secret})
-                        .expires_at_leeway(0);
-
-    verifier.verify(decoded_token, ecc);
-
-    if (ecc) {
-      std::cout << ec.message() << std::endl;
-      if (ecc == jwt::error::token_verification_error::token_expired)
-        ec = makeErrorCode(ServerError::AccessToken_Expired);
-      return std::nullopt;
-    }
-
-    auto val = decoded_token.get_payload_claim(payloadName).to_json();
-
-    return val.as_object();
-  } catch (const std::exception &ec) {
-  };
-
-  ec = makeErrorCode(ServerError::Invalid_AcessToken);
-  return std::nullopt;
-};
