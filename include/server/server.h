@@ -195,7 +195,7 @@ std::optional<T> GetRequest::parseBodyToObject(std::error_code &ec) const {
     ec = makeErrorCode(ServerError::Convert_Body_To_Object_Failed);
     return std::nullopt;
   }
-  auto tryVal = boost::json::try_value_to<T>(obj);
+  auto tryVal = boost::json::try_value_to<T>(val);
 
   if (tryVal.has_error()) {
     ec = makeErrorCode(ServerError::Convert_Body_To_Object_Failed);
