@@ -38,6 +38,7 @@
 #include <boost/beast/http/verb.hpp>
 #include <boost/json.hpp>
 #include <boost/json/object.hpp>
+#include <boost/json/serialize.hpp>
 #include <boost/mysql.hpp>
 #include <boost/mysql/connection_pool.hpp>
 #include <boost/none.hpp>
@@ -84,6 +85,9 @@ public:
 
   std::optional<boost::urls::params_view> queries(std::error_code &) const;
   std::optional<boost::json::object> body(std::error_code &) const;
+
+  template <typename T = boost::json::object>
+  std::optional<T> parseBodyToObject(std::error_code &ec) const;
 
   std::optional<boost::json::object> verifyJwt(const std::string &secret,
                                                const std::string &issuer,
@@ -143,7 +147,6 @@ inline std::optional<boost::json::object>
 GetRequest::verifyJwt(const std::string &secret, const std::string &issuer,
                       const std::string &audience,
                       const std::string &payloadName, std::error_code &ec) {
- 
 
   if (m_token.empty()) {
     ec = makeErrorCode(ServerError::Unauthorize_Access);
@@ -177,6 +180,19 @@ GetRequest::verifyJwt(const std::string &secret, const std::string &issuer,
 
   ec = makeErrorCode(ServerError::Invalid_AcessToken);
   return std::nullopt;
+};
+
+template <typename T>
+std::optional<T> GetRequest::parseBodyToObject(std::error_code &ec) const {
+  auto obj = boost::json::serialize(m_body);
+
+  auto tryVal = boost::json::try_value_to<T>(obj);
+  if (tryVal.has_error()) {
+
+    ec = makeErrorCode(ServerError::Convert_Body_To_Object_Failed);
+    return std::nullopt;
+  }
+  return tryVal.value();
 };
 
 class Server {
