@@ -86,10 +86,6 @@ public:
 
   std::optional<boost::urls::params_view> queries(std::error_code &) const;
   std::optional<boost::json::object> body(std::error_code &) const;
-
-  template <typename T = boost::json::object>
-  std::optional<T> parseBodyToObject(std::error_code &ec) const;
-
   std::optional<boost::json::object> verifyJwt(const std::string &secret,
                                                const std::string &issuer,
                                                const std::string &audience,
