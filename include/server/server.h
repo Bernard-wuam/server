@@ -179,26 +179,6 @@ GetRequest::verifyJwt(const std::string &secret, const std::string &issuer,
   return std::nullopt;
 };
 
-template <typename T>
-std::optional<T> GetRequest::parseBodyToObject(std::error_code &ec) const {
-
-  auto obj = boost::json::serialize(m_body);
-  boost::beast::error_code ecc;
-
-  auto val = boost::json::parse(obj, ecc);
-
-  if (ecc) {
-    ec = makeErrorCode(ServerError::Convert_Body_To_Object_Failed);
-    return std::nullopt;
-  }
-  auto tryVal = boost::json::try_value_to<T>(val);
-
-  if (tryVal.has_error()) {
-    ec = makeErrorCode(ServerError::Convert_Body_To_Object_Failed);
-    return std::nullopt;
-  }
-  return tryVal.value();
-};
 
 class Server {
 
