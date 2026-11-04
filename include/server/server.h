@@ -71,6 +71,7 @@ class GetRequest {
   boost::urls::params_view m_QueryList;
   boost::json::object m_body;
   std::string m_token;
+  int m_version;
 
   void setParams(const std::unordered_map<std::string, std::string> &);
   void setQueries(const boost::urls::params_view &);
@@ -79,6 +80,7 @@ class GetRequest {
 
   void setBody(const boost::json::object &object);
   void setToken(const std::string &token);
+  void setVersion(int version);
 
 public:
   std::optional<std::unordered_map<std::string, std::string>>
@@ -91,6 +93,7 @@ public:
                                                const std::string &audience,
                                                const std::string &payloadName,
                                                std::error_code &ec);
+  int version() const;
 
   friend class Server;
 };
@@ -179,6 +182,13 @@ GetRequest::verifyJwt(const std::string &secret, const std::string &issuer,
   return std::nullopt;
 };
 
+inline void GetRequest::setVersion(int version){
+  m_version = version;
+}
+
+inline int GetRequest::version() const {
+  return m_version;
+}
 
 class Server {
 
@@ -366,6 +376,8 @@ Server::httpsSession(boost::beast::flat_buffer &buffer, Stream &socketStream) {
     auto body = convertBodyToObject(reqParser.get(), ec);
     if (body.has_value())
       req.setBody(body.value());
+
+    req.setVersion(reqParser.get().version());
 
     for (auto &c : routes) {
       auto path = std::get<0>(c);
