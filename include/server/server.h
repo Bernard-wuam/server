@@ -71,6 +71,7 @@ class GetRequest {
   boost::urls::params_view m_QueryList;
   boost::json::object m_body;
   std::string m_token;
+  std::string m_cookie;
   int m_version;
 
   void setParams(const std::unordered_map<std::string, std::string> &);
@@ -81,6 +82,7 @@ class GetRequest {
   void setBody(const boost::json::object &object);
   void setToken(const std::string &token);
   void setVersion(int version);
+  void setCookie(const std::string &);
 
 public:
   std::optional<std::unordered_map<std::string, std::string>>
@@ -93,6 +95,8 @@ public:
                                                const std::string &audience,
                                                const std::string &payloadName,
                                                std::error_code &ec);
+  std::optional<std::string> cookie(std::error_code &) const;
+
   int version() const;
 
   friend class Server;
@@ -185,6 +189,19 @@ GetRequest::verifyJwt(const std::string &secret, const std::string &issuer,
 inline void GetRequest::setVersion(int version) { m_version = version; }
 
 inline int GetRequest::version() const { return m_version; }
+
+inline void GetRequest::setCookie(const std::string &cookie) {
+  m_cookie = cookie;
+}
+
+inline std::optional<std::string>
+GetRequest::cookie(std::error_code &ec) const {
+  if (m_cookie.empty()) {
+    ec = makeErrorCode(ServerError::Cookie_Not_Found_In_Target);
+    return std::nullopt;
+  }
+  return m_cookie;
+}
 
 class Server {
 
@@ -380,6 +397,7 @@ Server::httpsSession(boost::beast::flat_buffer &buffer, Stream &socketStream) {
     if (reqParser.get().count(boost::beast::http::field::cookie)) {
       auto cookie = reqParser.get()[boost::beast::http::field::cookie];
       // set the cookie on the request object.
+      req.setCookie(cookie);
     }
 
     for (auto &c : routes) {
