@@ -182,13 +182,9 @@ GetRequest::verifyJwt(const std::string &secret, const std::string &issuer,
   return std::nullopt;
 };
 
-inline void GetRequest::setVersion(int version){
-  m_version = version;
-}
+inline void GetRequest::setVersion(int version) { m_version = version; }
 
-inline int GetRequest::version() const {
-  return m_version;
-}
+inline int GetRequest::version() const { return m_version; }
 
 class Server {
 
@@ -378,6 +374,13 @@ Server::httpsSession(boost::beast::flat_buffer &buffer, Stream &socketStream) {
       req.setBody(body.value());
 
     req.setVersion(reqParser.get().version());
+
+    // set the cookies
+
+    if (reqParser.get().count(boost::beast::http::field::cookie)) {
+      auto cookie = reqParser.get()[boost::beast::http::field::cookie];
+      // set the cookie on the request object.
+    }
 
     for (auto &c : routes) {
       auto path = std::get<0>(c);
