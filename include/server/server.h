@@ -52,6 +52,7 @@
 #include <exception>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <jwt-cpp/jwt.h>
 #include <jwt-cpp/traits/boost-json/traits.h>
 #include <optional>
@@ -397,7 +398,11 @@ Server::httpsSession(boost::beast::flat_buffer &buffer, Stream &socketStream) {
     if (reqParser.get().count(boost::beast::http::field::cookie)) {
       auto cookie = reqParser.get()[boost::beast::http::field::cookie];
       // set the cookie on the request object.
-      req.setCookie(cookie);
+      auto cookieSplit = std::views::split(cookie, '=');
+      if (std::ranges::distance(cookieSplit) == 2) {
+        auto cookiesIt = *(std::ranges::next(cookieSplit.begin()));
+        req.setCookie(std::string(cookiesIt.begin(), cookiesIt.end()));
+      }
     }
 
     for (auto &c : routes) {
